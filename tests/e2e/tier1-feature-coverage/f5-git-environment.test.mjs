@@ -72,9 +72,9 @@ export const tests = [
         throw new Error(`Failed to list tracked git files: ${err.message}`);
       }
 
-      // Check for committed secrets or video binaries
+      // Check for committed secrets or video binaries (allowing safe .env.example template)
       const forbiddenPatterns = [
-        /\.env($|\.)/,
+        /(^|\/)\.env($|\.(?!example$))/,
         /\.pem$/,
         /\.key$/,
         /\.mp4$/i,
