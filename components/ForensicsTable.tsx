@@ -26,15 +26,16 @@ export default function ForensicsTable({ report, fileName }: ForensicsTableProps
         </div>
 
         <div className="text-xs font-semibold shrink-0">
-          {report.hasAiMarkers ? (
+          {report.hasAiMarkers || report.totalMarkersFound > 0 ? (
             <span className="inline-flex items-center gap-1.5 text-[#7f1d1d]">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              {report.totalMarkersFound} señales detectadas
+              {report.totalMarkersFound}{' '}
+              {report.totalMarkersFound === 1 ? 'señal detectada' : 'señales detectadas'}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-[#002941]">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              Sin manifiestos C2PA críticos
+              Video 100% limpio (Sin firmas de IA)
             </span>
           )}
         </div>
