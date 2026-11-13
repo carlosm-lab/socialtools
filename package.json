@@ -7,11 +7,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node scripts/verify-all.mjs",
+    "test:e2e": "node tests/e2e/runner.mjs"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
+    "@paddle/paddle-js": "^1.6.6",
     "lucide-react": "^0.454.0",
     "next": "^14.2.16",
     "react": "^18.3.1",

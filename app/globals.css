@@ -4,10 +4,91 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    --navy: #002941;
+    --navy-deep: #001d2e;
+    --slate: #335467;
+    --mint: #cfe8e1;
+    --mint-soft: #eaf5f1;
+    --canvas: #f7fbf9;
+    --surface: #ffffff;
+    --divider: #b8d8cf;
+    --alert-text: #7f1d1d;
+    --alert-bg: #fdf2f2;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 
   body {
-    @apply bg-zinc-950 text-zinc-100 antialiased;
+    background-color: #cfe8e1;
+    color: #002941;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
+
+  ::selection {
+    background-color: #002941;
+    color: #cfe8e1;
+  }
+}
+
+/* Primary clean Midnight Navy button (minimum 48px touch target, 12px modern corners, NO pill badges) */
+.btn-navy {
+  min-height: 48px;
+  border-radius: 12px;
+  background-color: #002941;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  transition: background-color 0.16s ease, transform 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  user-select: none;
+}
+
+.btn-navy:hover {
+  background-color: #001d2e;
+}
+
+.btn-navy:active {
+  transform: scale(0.985);
+}
+
+.btn-navy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Secondary clean outline button (>=44px touch target) */
+.btn-outline-navy {
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  border: 1px solid #b8d8cf;
+  background-color: #ffffff;
+  color: #002941;
+  font-weight: 600;
+  padding: 0.625rem 1.125rem;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  user-select: none;
+}
+
+.btn-outline-navy:hover {
+  background-color: #eaf5f1;
+  border-color: #002941;
+}
+
+.btn-outline-navy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

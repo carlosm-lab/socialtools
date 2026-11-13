@@ -38,3 +38,19 @@ Thumbs.db
 clean_video_*.mp4
 test_*.mp4
 temp_*.mp4
+
+# Local Database and Data Store
+/data/
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.tmp.*
+
+
+# Vercel / build artifacts
+.vercel
+.next-*/
+verify_tmp_*
+*.log

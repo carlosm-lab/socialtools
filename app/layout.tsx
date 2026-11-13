@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-jakarta',
   display: 'swap',
 });
 
@@ -15,26 +15,28 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CleanStream Studio | Eliminador de Metadatos C2PA y Anti-SynthID en el Navegador',
+  metadataBase: new URL('https://www.socialtools.click'),
+  title: 'SocialTools · CleanStream Studio — Elimina Marcas de IA C2PA y SynthID en tu Navegador',
   description:
-    'Suite profesional de privacidad multimedia 100% client-side impulsada por WebAssembly (FFmpeg.wasm). Elimina contenedores C2PA, XMP, EXIF y firmas esteganográficas invisibles como SynthID sin subir tus videos a ningún servidor.',
+    'Limpia metadatos C2PA, etiquetas EXIF/XMP y firmas esteganográficas SynthID de Veo 3.1, Sora y Runway 100% en tu navegador sin subir archivos a ningún servidor.',
   keywords: [
+    'SocialTools',
     'CleanStream Studio',
     'C2PA',
     'SynthID',
     'EXIF',
     'XMP',
     'FFmpeg WebAssembly',
-    'Privacidad de Video',
-    'Limpieza de Metadatos',
+    'UGC Agency',
+    'TikTok Reels Shorts',
   ],
 };
 
 export const viewport: Viewport = {
-  themeColor: '#09090b',
+  themeColor: '#002941',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -43,9 +45,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${inter.variable} ${jetbrainsMono.variable} dark`}>
-      <body className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200 overflow-x-hidden">
-        <div className="fixed inset-0 -z-10 pointer-events-none bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(16,185,129,0.12),rgba(9,9,11,0))]" />
+    <html lang="es" className={`${jakarta.variable} ${jetbrainsMono.variable}`}>
+      <body className="min-h-screen bg-[#cfe8e1] text-[#002941] font-sans antialiased overflow-x-hidden">
         {children}
       </body>
     </html>
