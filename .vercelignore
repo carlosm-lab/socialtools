@@ -1,0 +1,18 @@
+# Test fixtures and local storage
+*.mp4
+data/
+verify_tmp_*
+*.tmp.*
+*.log
+
+# Dev & verification scripts (keep production bundle lean)
+tests/
+scripts/
+
+# Build & environment caches
+.next/
+.next-*/
+node_modules/
+.env*.local
+.env
+
