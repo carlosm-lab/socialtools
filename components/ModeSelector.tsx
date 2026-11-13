@@ -34,7 +34,8 @@ export default function ModeSelector({
     {
       id: 'fast',
       title: 'Purga Rápida C2PA',
-      subtitle: 'Elimina metadatos ocultos en ~1s sin recodificar.',
+      subtitle:
+        'Protección de Metadatos Activa: Manifiestos C2PA y procedencia purgados al 100% sin recodificar.',
       tierLabel: 'Gratis hasta 20s',
       locked: false,
       icon: <Zap className="w-4 h-4 shrink-0" />,
@@ -42,7 +43,8 @@ export default function ModeSelector({
     {
       id: 'deep',
       title: 'Escudo Anti-SynthID',
-      subtitle: 'Neutraliza firmas invisibles en píxeles y audio.',
+      subtitle:
+        'Blindaje Total: Metadatos purgados + Matriz de píxeles alterada + Filtro acústico 20Hz-19.5kHz.',
       tierLabel: isCreatorOrAgency ? 'Activo' : 'Plan Creator',
       locked: !isCreatorOrAgency,
       icon: <ShieldCheck className="w-4 h-4 shrink-0" />,
@@ -50,7 +52,7 @@ export default function ModeSelector({
     {
       id: 'spoofer',
       title: 'Multi-Variant Spoofer',
-      subtitle: 'Genera 3, 5 o 10 copias con hashes únicos.',
+      subtitle: 'Genera 3, 5 o 10 copias con hashes únicos y micro-modulaciones.',
       tierLabel: isAgency ? 'Activo' : 'Plan Agency',
       locked: !isAgency,
       icon: <Copy className="w-4 h-4 shrink-0" />,

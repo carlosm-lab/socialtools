@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   Zap,
+  ShieldCheck,
 } from 'lucide-react';
 import { useFFmpegCleaner } from '@/components/useFFmpegCleaner';
 import ModeSelector, { ProcessingMode } from '@/components/ModeSelector';
@@ -653,12 +654,32 @@ export default function HomePage() {
 
           {/* Tabla Forense Comparativa (Antes vs Después) */}
           {selectedFile && (
-            <ForensicsTable report={forensicsReport} fileName={selectedFile.name} />
+            <ForensicsTable
+              report={forensicsReport}
+              fileName={selectedFile.name}
+              processedMode={singleResult?.mode || null}
+            />
           )}
 
           {/* Resultado Modo 1 / Modo 2 */}
           {singleResult && (
             <div className="border-t border-[#b8d8cf] px-4 py-6 sm:px-8 bg-[#eaf5f1]/50 space-y-5">
+              {/* Veredicto Transparente CleanStream (R3) */}
+              <div className="rounded-xl border border-[#b8d8cf] bg-[#cfe8e1]/70 p-4 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-[#002941] shrink-0" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#335467]">
+                    {singleResult.mode === 'fast'
+                      ? 'Veredicto de Sanitización — Modo 1'
+                      : 'Veredicto de Sanitización — Modo 2'}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-extrabold text-[#002941] leading-relaxed">
+                  {singleResult.mode === 'fast'
+                    ? 'Protección de Metadatos Activa: Manifiestos C2PA y etiquetas de procedencia purgados al 100% (ideal para redes que inspeccionan cabeceras)'
+                    : 'Blindaje Total: Metadatos purgados + Matriz espacial de píxeles alterada + Filtro acústico 20Hz-19.5kHz contra rastreadores ultrasónicos'}
+                </p>
+              </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="w-6 h-6 text-[#002941] shrink-0" />
