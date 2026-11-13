@@ -61,22 +61,22 @@ export async function scanVideoForensics(file: File): Promise<ForensicsReport> {
 
   const hasAiMarkers = hasC2PA || hasSynthID || hasTrainedMedia || hasGoogleProvenance;
 
-  // Genuine XMP / EXIF packages and unstripped encoder metadata tags.
+  // Genuine XMP / EXIF packages and unstripped generator metadata tags.
   // Note: Standard structural MP4 container atoms (such as 'udta' box headers)
-  // are standard ISO/IEC 14496-12 atoms and NOT sensitive metadata.
+  // and sanitized ISO compressor tags (such as 'Lavc') are container stream entries,
+  // NOT sensitive metadata or AI provenance.
   const hasXMP =
     text.includes('<?xpacket') ||
     text.includes('http://ns.adobe.com/xap/1.0/') ||
     text.includes('W5M0MpCehiHzreSzNTczkc9d') ||
-    text.includes('xmp:') ||
+    text.includes('<x:xmpmeta') ||
+    text.includes('xmlns:xmp=') ||
     text.includes('xmpDM:');
 
   const hasExifOrEncoderTags =
     text.includes('Exif\0\0') ||
     text.includes('GPSVersionID') ||
     text.includes('x264 - core') ||
-    text.includes('Lavf') ||
-    text.includes('Lavc') ||
     text.includes('Google Inc.');
 
   const hasMetadataAlert = hasXMP || hasExifOrEncoderTags;
