@@ -59,16 +59,25 @@ export async function scanVideoForensics(
 ): Promise<ForensicsReport> {
   const processedMode = options?.processedMode || null;
 
-  // Read first 6MB which contains container headers, moov atoms, uuid boxes, and manifests
-  const sampleSize = Math.min(file.size, 6 * 1024 * 1024);
-  const headerSlice = file.slice(0, sampleSize);
-  const arrayBuffer = await headerSlice.arrayBuffer();
-  const text = new TextDecoder('latin1').decode(new Uint8Array(arrayBuffer));
+  // Read both head (first 4MB) and tail (last 4MB)
+  // Web-optimized MP4 files have 'moov' at the head; smartphone/camera recordings write 'moov' at EOF (tail)
+  const headSize = Math.min(file.size, 4 * 1024 * 1024);
+  const headSlice = file.slice(0, headSize);
+  const headBuffer = await headSlice.arrayBuffer();
+  let text = new TextDecoder('latin1').decode(new Uint8Array(headBuffer));
+
+  if (file.size > headSize) {
+    const tailSize = Math.min(file.size - headSize, 4 * 1024 * 1024);
+    const tailSlice = file.slice(file.size - tailSize, file.size);
+    const tailBuffer = await tailSlice.arrayBuffer();
+    const tailText = new TextDecoder('latin1').decode(new Uint8Array(tailBuffer));
+    text += '\n' + tailText;
+  }
 
   // Compute SHA-256 of header slice or small file
   let originalSha256 = '';
   try {
-    originalSha256 = await computeSHA256(arrayBuffer);
+    originalSha256 = await computeSHA256(headBuffer);
   } catch {
     originalSha256 = 'unknown';
   }
@@ -118,15 +127,28 @@ export async function scanVideoForensics(
   const hasCameraHardware =
     text.includes('com.android.manufacturer') ||
     text.includes('com.android.model') ||
+    text.includes('com.android.version') ||
     text.includes('com.xiaomi.') ||
     text.includes('com.samsung.') ||
+    text.includes('com.huawei.') ||
+    text.includes('com.oppo.') ||
+    text.includes('com.vivo.') ||
+    text.includes('com.oneplus.') ||
+    text.includes('com.motorola.') ||
+    text.includes('com.google.android.camera') ||
     text.includes('com.apple.quicktime.make') ||
     text.includes('com.apple.quicktime.model') ||
+    text.includes('com.apple.quicktime.software') ||
     text.includes('Canon') ||
     text.includes('Sony') ||
     text.includes('NIKON') ||
     text.includes('GoPro') ||
-    text.includes('DJI');
+    text.includes('DJI') ||
+    text.includes('Panasonic') ||
+    text.includes('FUJIFILM') ||
+    text.includes('OLYMPUS') ||
+    text.includes('LEICA') ||
+    text.includes('Blackmagic');
 
   // Sanitized Stream-Level Signatures (CleanStream engine signatures or re-encoded streams)
   const hasMode2Marker =
