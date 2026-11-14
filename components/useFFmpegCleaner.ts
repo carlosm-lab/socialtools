@@ -421,6 +421,8 @@ export function useFFmpegCleaner(): UseFFmpegCleanerReturn {
             'encoder=',
             '-metadata:s:a:0',
             'encoder=',
+            '-metadata',
+            'cleanstream_sanitization=mode1_c2pa_purged',
             'output_mode1.mp4',
           ]);
           if (exitCode !== 0) {
@@ -527,6 +529,8 @@ export function useFFmpegCleaner(): UseFFmpegCleanerReturn {
             'encoder=',
             '-metadata:s:a:0',
             'encoder=',
+            '-metadata',
+            'cleanstream_sanitization=mode2_synthid_shielded',
             '-movflags',
             '+faststart',
             'output_mode2.mp4',
@@ -643,6 +647,8 @@ export function useFFmpegCleaner(): UseFFmpegCleanerReturn {
               'encoder=',
               '-metadata:s:a:0',
               'encoder=',
+              '-metadata',
+              'cleanstream_sanitization=mode2_synthid_shielded',
               '-movflags',
               '+faststart',
               outFileName,

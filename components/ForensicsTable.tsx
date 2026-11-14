@@ -18,8 +18,9 @@ export default function ForensicsTable({
   if (!report) return null;
 
   const effectiveMode = processedMode || report.processedMode || null;
-  const isMode1 = effectiveMode === 'fast';
-  const isMode2 = effectiveMode === 'deep';
+  const isMode1 = effectiveMode === 'fast' || report.fileCategory === 'mode1_purged';
+  const isMode2 = effectiveMode === 'deep' || report.fileCategory === 'mode2_shielded';
+  const isCamera = report.fileCategory === 'camera_optical';
 
   // Group items into Layer 1 and Layer 2
   const layer1Items: DiagnosticItem[] =
@@ -65,9 +66,14 @@ export default function ForensicsTable({
               Blindaje Total Certificado
             </span>
           ) : isMode1 ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#fdf2f2] text-[#7f1d1d]">
+              <AlertCircle className="w-4 h-4 text-[#7f1d1d]" />
+              (2) 2 señales latentes (Solo protección básica de metadatos)
+            </span>
+          ) : isCamera ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#cfe8e1] text-[#002941]">
               <CheckCircle2 className="w-4 h-4 text-[#002941]" />
-              Capa 1 Purgada al 100%
+              Video de cámara auténtico (0 firmas de IA)
             </span>
           ) : report.hasAiMarkers || report.totalMarkersFound > 0 ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#fdf2f2] text-[#7f1d1d]">
@@ -276,6 +282,8 @@ export default function ForensicsTable({
                       <div className="flex items-start gap-2">
                         {isMode2 ? (
                           <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#002941]" />
+                        ) : isAlert ? (
+                          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#7f1d1d]" />
                         ) : (
                           <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#002941]" />
                         )}
@@ -313,6 +321,8 @@ export default function ForensicsTable({
                 <div className="px-3 py-2 rounded-lg bg-[#cfe8e1]/55 text-[#002941] flex items-start gap-2">
                   {isMode2 ? (
                     <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#002941]" />
+                  ) : isAlert ? (
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#7f1d1d]" />
                   ) : (
                     <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#002941]" />
                   )}
