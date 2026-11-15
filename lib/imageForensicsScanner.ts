@@ -17,6 +17,71 @@ export interface ScanImageOptions {
   sourcePixels?: PixelMatrix;
 }
 
+/**
+ * Extracts and details the exact metadata tags, EXIF blocks, and IPTC datasets found in images.
+ */
+export function extractImageMetadataDetails(text: string): string {
+  const details: string[] = [];
+
+  // 1. EXIF Header & GPS
+  if (text.includes('Exif\0\0')) {
+    details.push('Cabecera EXIF (TIFF IFD0)');
+  }
+  if (text.includes('GPSVersionID') || text.includes('GPSInfo')) {
+    details.push('Metadatos de geolocalización GPS');
+  }
+
+  // 2. Camera / Device Hardware tags
+  const cameras: string[] = [];
+  if (text.includes('Canon')) cameras.push('Canon');
+  if (text.includes('NIKON') || text.includes('Nikon')) cameras.push('Nikon');
+  if (text.includes('Sony')) cameras.push('Sony');
+  if (text.includes('Apple')) cameras.push('Apple');
+  if (text.includes('Samsung')) cameras.push('Samsung');
+  if (text.includes('Xiaomi') || text.includes('POCO')) cameras.push('Xiaomi');
+  if (text.includes('FUJIFILM') || text.includes('Fujifilm')) cameras.push('Fujifilm');
+  if (text.includes('OLYMPUS') || text.includes('Olympus')) cameras.push('Olympus');
+  if (text.includes('LEICA') || text.includes('Leica')) cameras.push('Leica');
+  if (cameras.length > 0) {
+    details.push(`Cámara: ${cameras.join(', ')}`);
+  }
+
+  // 3. Adobe XMP & XML schemas
+  if (text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<x:xmpmeta')) {
+    details.push('Paquete XMP Adobe (ns.adobe.com/xap/1.0/)');
+  } else if (text.includes('xmlns:xmp=') || text.includes('<?xpacket')) {
+    details.push('Paquete de metadatos XMP');
+  }
+
+  // 4. IPTC / Photoshop Resources
+  if (text.includes('Photoshop 3.0') || text.includes('8BIM')) {
+    details.push('Recursos Photoshop IPTC (8BIM)');
+  } else if (text.includes('\x1c\x02')) {
+    details.push('Registro IPTC (ApplicationRecord)');
+  }
+
+  // 5. Software & Editor tags
+  if (text.includes('Adobe Photoshop') || text.includes('Photoshop')) {
+    details.push('Software: Adobe Photoshop');
+  } else if (text.includes('Lightroom')) {
+    details.push('Software: Adobe Lightroom');
+  } else if (text.includes('GIMP')) {
+    details.push('Software: GIMP');
+  }
+
+  // 6. PNG & WebP specific chunks
+  if (text.includes('tEXt') || text.includes('iTXt') || text.includes('zTXt')) {
+    details.push('Bloques de texto PNG (tEXt/iTXt)');
+  }
+  if (text.includes('eXIf')) {
+    details.push('Chunk PNG eXIf');
+  }
+
+  return details.length > 0
+    ? `Detectado: ${details.join(', ')}`
+    : 'Detectado: Bloque de metadatos de imagen presente';
+}
+
 export async function scanImageForensics(
   file: File | Blob | Uint8Array,
   options?: ScanImageOptions
@@ -166,7 +231,7 @@ export async function scanImageForensics(
       name: 'Bloques de Metadatos XMP / EXIF',
       detected: isMetadataAlertItem,
       currentState: isMetadataAlertItem
-        ? 'Presente (Paquetes XMP, bloques EXIF y etiquetas de autor)'
+        ? extractImageMetadataDetails(text)
         : fileCategory === 'mode1_purged' || fileCategory === 'mode2_shielded'
         ? 'Atributos eliminados (0 EXIF, 0 IPTC, 0 XMP)'
         : 'Limpio (Sin paquetes XMP ni bloques EXIF)',

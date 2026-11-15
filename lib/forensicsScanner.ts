@@ -51,6 +51,71 @@ export interface ScanVideoOptions {
 }
 
 /**
+ * Extracts and details the exact metadata tags and encoder blocks found in video containers.
+ */
+export function extractVideoMetadataDetails(text: string): string {
+  const details: string[] = [];
+
+  // 1. Adobe XMP & XML schemas
+  if (text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<x:xmpmeta')) {
+    details.push('Paquete XMP Adobe (ns.adobe.com/xap/1.0/)');
+  } else if (text.includes('xmpDM:')) {
+    details.push('Esquema XMP Dynamic Media');
+  } else if (text.includes('<?xpacket') || text.includes('xmlns:xmp=')) {
+    details.push('Paquete de metadatos XMP');
+  }
+
+  // 2. EXIF & GPS
+  if (text.includes('GPSVersionID') || text.includes('©xyz')) {
+    details.push('Metadatos de ubicación GPS');
+  }
+  if (text.includes('Exif\0\0')) {
+    details.push('Bloque EXIF IFD0');
+  }
+
+  // 3. Camera / Device Hardware tags
+  const devices: string[] = [];
+  if (text.includes('com.xiaomi.') || text.includes('Xiaomi') || text.includes('POCO')) devices.push('Xiaomi/POCO');
+  if (text.includes('com.samsung.') || text.includes('Samsung')) devices.push('Samsung');
+  if (text.includes('com.apple.quicktime') || text.includes('Apple')) devices.push('Apple');
+  if (text.includes('com.huawei.') || text.includes('Huawei')) devices.push('Huawei');
+  if (text.includes('com.oppo.') || text.includes('OPPO')) devices.push('OPPO');
+  if (text.includes('com.vivo.') || text.includes('vivo')) devices.push('vivo');
+  if (text.includes('Canon')) devices.push('Canon');
+  if (text.includes('Sony')) devices.push('Sony');
+  if (text.includes('NIKON') || text.includes('Nikon')) devices.push('Nikon');
+  if (text.includes('GoPro')) devices.push('GoPro');
+  if (text.includes('DJI')) devices.push('DJI');
+  if (devices.length > 0) {
+    details.push(`Dispositivo: ${devices.join(', ')}`);
+  }
+
+  // 4. Encoder Signatures
+  const x264Match = text.match(/x264 - core (\d+)/);
+  if (x264Match) {
+    details.push(`Firma de codificador x264 (core ${x264Match[1]})`);
+  } else if (text.includes('x264')) {
+    details.push('Firma de codificador x264');
+  }
+
+  if (text.includes('Lavf') || text.includes('Lavc')) {
+    details.push('Firma FFmpeg (Lavf/Lavc)');
+  }
+
+  // 5. Handler & Author tags
+  const handlerMatch = text.match(/ISO Media file produced by ([^\.\r\n]+)/);
+  if (handlerMatch) {
+    details.push(`Firma de autor: ${handlerMatch[1].trim()}`);
+  } else if (text.includes('Google Inc.')) {
+    details.push('Firma de autor: Google Inc.');
+  }
+
+  return details.length > 0
+    ? `Detectado: ${details.join(', ')}`
+    : 'Detectado: Bloque de metadatos de contenedor presente';
+}
+
+/**
  * Scans an in-memory video file for AI provenance, C2PA manifests,
  * SynthID watermarks, IPTC algorithmic tags, and container metadata.
  * Implements a Two-Layer Forensic Report Architecture:
@@ -262,7 +327,7 @@ export async function scanVideoForensics(
       name: 'Bloques de Metadatos XMP / EXIF',
       detected: isMetadataAlert,
       currentState: isMetadataAlert
-        ? 'Presente (Paquetes XMP, átomos de autor y firmas de codificador)'
+        ? extractVideoMetadataDetails(text)
         : fileCategory === 'mode1_purged' || fileCategory === 'mode2_shielded'
         ? 'Atributos eliminados (-map_metadata -1 y +bitexact)'
         : 'Limpio (Sin paquetes XMP, EXIF ni firmas de codificador)',
