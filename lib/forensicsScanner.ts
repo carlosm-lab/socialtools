@@ -4,6 +4,10 @@ import {
   analyzeAudioSpectrum,
   AcousticAnalysisResult,
 } from './acousticAnalyzer';
+import { scanImageForensics, ScanImageOptions } from './imageForensicsScanner';
+
+export { scanImageForensics };
+export type { ScanImageOptions };
 
 export interface DiagnosticItem {
   id: string;
@@ -362,4 +366,22 @@ export async function scanVideoForensics(
       items: layer2Items,
     },
   };
+}
+
+/**
+ * Universal media forensic scanner dispatcher:
+ * Automatically routes images to scanImageForensics and videos to scanVideoForensics.
+ */
+export async function scanMediaForensics(
+  file: File,
+  options?: ScanVideoOptions & ScanImageOptions
+): Promise<ForensicsReport> {
+  const isImage =
+    file.type.startsWith('image/') ||
+    /\.(jpe?g|png|webp|avif|heic|heif|tiff?|bmp)$/i.test(file.name);
+
+  if (isImage) {
+    return scanImageForensics(file, options);
+  }
+  return scanVideoForensics(file, options);
 }

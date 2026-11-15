@@ -7,6 +7,7 @@ import {
   Download,
   RotateCcw,
   FileVideo,
+  ImageIcon,
   CheckCircle2,
   AlertCircle,
   Trash2,
@@ -20,6 +21,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useFFmpegCleaner } from '@/components/useFFmpegCleaner';
+import { useImageCleaner } from '@/components/useImageCleaner';
 import ModeSelector, { ProcessingMode } from '@/components/ModeSelector';
 import ForensicsTable from '@/components/ForensicsTable';
 import PricingTable from '@/components/PricingTable';
@@ -53,27 +55,47 @@ export default function HomePage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [mediaType, setMediaType] = useState<'video' | 'image' | null>(null);
+  const videoCleaner = useFFmpegCleaner();
+  const imageCleaner = useImageCleaner();
+
+  const isImage = mediaType === 'image';
+  const activeCleaner = isImage ? imageCleaner : videoCleaner;
+
   const {
     engineStatus,
-    selectedFile,
-    originalPreviewUrl,
-    fileDuration,
-    forensicsReport,
-    isScanning,
-    isProcessing,
-    progressPercent,
-    currentStep,
-    stepMessage,
-    processingTimeSec,
-    processError,
+    engineError,
     sessionLogs,
-    singleResult,
-    variantResults,
-    selectFile,
-    clearFile,
     clearSessionLogs,
-    executeClean,
-  } = useFFmpegCleaner();
+  } = videoCleaner;
+
+  const selectedFile = activeCleaner.selectedFile;
+  const originalPreviewUrl = activeCleaner.originalPreviewUrl;
+  const fileDuration = !isImage ? videoCleaner.fileDuration : null;
+  const forensicsReport = activeCleaner.forensicsReport;
+  const isScanning = activeCleaner.isScanning;
+  const isProcessing = activeCleaner.isProcessing;
+  const progressPercent = activeCleaner.progressPercent;
+  const currentStep = activeCleaner.currentStep;
+  const stepMessage = activeCleaner.stepMessage;
+  const processingTimeSec = activeCleaner.processingTimeSec;
+  const processError = activeCleaner.processError;
+  const singleResult = activeCleaner.singleResult;
+  const variantResults = activeCleaner.variantResults;
+
+  const clearFile = async () => {
+    await videoCleaner.clearFile();
+    await imageCleaner.clearFile();
+    setMediaType(null);
+  };
+
+  const executeClean = async (
+    mode: ProcessingMode,
+    vCount?: 3 | 5 | 10,
+    features?: typeof licenseFeatures
+  ) => {
+    await activeCleaner.executeClean(mode, vCount, features);
+  };
 
   const handleLicenseVerified = (data: VerifyLicenseResponse) => {
     if (data.valid && data.plan) {
@@ -153,6 +175,22 @@ export default function HomePage() {
       });
   }, []);
 
+  const handleFileSelection = async (file: File) => {
+    const isImg =
+      file.type.startsWith('image/') ||
+      /\.(jpe?g|png|webp|avif|heic|heif|tiff?|bmp)$/i.test(file.name);
+
+    if (isImg) {
+      setMediaType('image');
+      await videoCleaner.clearFile();
+      await imageCleaner.selectFile(file);
+    } else {
+      setMediaType('video');
+      await imageCleaner.clearFile();
+      await videoCleaner.selectFile(file);
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
@@ -160,8 +198,12 @@ export default function HomePage() {
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
-      if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
-        await selectFile(file);
+      if (
+        file.type.startsWith('video/') ||
+        file.type.startsWith('image/') ||
+        /\.(mp4|mov|webm|m4v|jpe?g|png|webp|avif|heic|heif|tiff?|bmp)$/i.test(file.name)
+      ) {
+        await handleFileSelection(file);
       }
     }
   };
@@ -181,7 +223,7 @@ export default function HomePage() {
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      await selectFile(files[0]);
+      await handleFileSelection(files[0]);
     }
     e.target.value = '';
   };
@@ -463,7 +505,7 @@ export default function HomePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="video/mp4,video/quicktime,video/webm"
+            accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp,image/avif,image/heic,image/tiff,image/bmp"
             onChange={handleFileInputChange}
             className="hidden"
           />
@@ -491,10 +533,10 @@ export default function HomePage() {
                   <Upload className="w-6 h-6" />
                 </div>
                 <h2 className="text-base sm:text-lg font-extrabold text-[#002941]">
-                  Toca para elegir un video o arrástralo aquí
+                  Toca para elegir un video o imagen, o arrástralo aquí
                 </h2>
                 <p className="text-xs sm:text-sm text-[#335467] mt-1.5 max-w-md mx-auto">
-                  MP4, MOV o WebM · Hasta 20s gratis en Modo 1 · Procesamiento 100% en tu dispositivo
+                  Video (MP4, MOV, WebM) o Imagen (JPG, PNG, WEBP, AVIF, HEIC, TIFF, BMP) · Hasta 20s gratis en Modo 1 · Procesamiento 100% en tu dispositivo
                 </p>
                 <div className="mt-5">
                   <button
@@ -506,7 +548,7 @@ export default function HomePage() {
                     className="btn-navy w-full sm:w-auto text-xs sm:text-sm"
                   >
                     <Upload className="w-4 h-4 text-[#cfe8e1]" />
-                    <span>Seleccionar video del dispositivo</span>
+                    <span>Seleccionar archivo del dispositivo</span>
                   </button>
                 </div>
               </div>
@@ -515,7 +557,7 @@ export default function HomePage() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-11 h-11 min-h-[44px] min-w-[44px] rounded-xl bg-[#002941] text-[#cfe8e1] flex items-center justify-center shrink-0">
-                      <FileVideo className="w-5 h-5" />
+                      {isImage ? <ImageIcon className="w-5 h-5" /> : <FileVideo className="w-5 h-5" />}
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm sm:text-base font-bold text-[#002941] truncate">
@@ -528,6 +570,18 @@ export default function HomePage() {
                         )}
                         <span>· En memoria local</span>
                       </div>
+                      {isImage && imageCleaner.imageFormatInfo && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-[#cfe8e1] text-[#002941]">
+                            {imageCleaner.imageFormatInfo.format.toUpperCase() === 'JPEG' ? 'JPG' : imageCleaner.imageFormatInfo.format.toUpperCase()}
+                          </span>
+                          <span className="text-[11px] text-[#335467] font-semibold">
+                            {imageCleaner.imageFormatInfo.width && imageCleaner.imageFormatInfo.height
+                              ? `${imageCleaner.imageFormatInfo.width}×${imageCleaner.imageFormatInfo.height} px · `
+                              : ''}Formato verificado por magic bytes
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -581,13 +635,22 @@ export default function HomePage() {
 
                 {originalPreviewUrl && !singleResult && variantResults.length === 0 && (
                   <div className="flex justify-center">
-                    <video
-                      src={originalPreviewUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="max-h-[280px] w-auto max-w-full rounded-xl bg-[#001d2e]"
-                    />
+                    {isImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={originalPreviewUrl}
+                        alt="Vista previa original source preview"
+                        className="max-h-[280px] w-auto max-w-full rounded-xl object-contain bg-[#001d2e]/5 border border-[#b8d8cf]"
+                      />
+                    ) : (
+                      <video
+                        src={originalPreviewUrl}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="max-h-[280px] w-auto max-w-full rounded-xl bg-[#001d2e]"
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -685,7 +748,7 @@ export default function HomePage() {
                   <CheckCircle2 className="w-6 h-6 text-[#002941] shrink-0" />
                   <div>
                     <h3 className="text-sm sm:text-base font-extrabold text-[#002941]">
-                      Video sanitizado en {processingTimeSec}s
+                      {isImage ? 'Imagen sanitizada en ' : 'Video sanitizado en '}{processingTimeSec}s
                     </h3>
                     <p className="text-xs text-[#335467]">
                       {(singleResult.fileSize / (1024 * 1024)).toFixed(2)} MB · Listo para publicar
@@ -708,19 +771,46 @@ export default function HomePage() {
                     className="btn-navy min-h-[48px] text-xs sm:text-sm"
                   >
                     <Download className="w-4 h-4 text-[#cfe8e1]" />
-                    <span>Descargar video limpio</span>
+                    <span>{isImage ? 'Descargar imagen limpia' : 'Descargar video limpio'}</span>
                   </a>
                 </div>
               </div>
 
               <div className="flex justify-center">
-                <video
-                  src={singleResult.blobUrl}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="max-h-[300px] w-auto max-w-full rounded-xl bg-[#001d2e]"
-                />
+                {isImage ? (
+                  <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#335467]">
+                        Original (Antes)
+                      </span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={originalPreviewUrl || ''}
+                        alt="Vista previa original source preview"
+                        className="max-h-[260px] w-auto max-w-full rounded-xl object-contain bg-[#001d2e]/5 border border-[#b8d8cf]"
+                      />
+                    </div>
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#002941]">
+                        Sanitizada (Después)
+                      </span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={singleResult.blobUrl}
+                        alt="Vista previa resultado processed resultUrl"
+                        className="max-h-[260px] w-auto max-w-full rounded-xl object-contain bg-[#001d2e]/5 border border-[#b8d8cf]"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <video
+                    src={singleResult.blobUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-[300px] w-auto max-w-full rounded-xl bg-[#001d2e]"
+                  />
+                )}
               </div>
 
               <div className="divide-y md:divide-y-0 md:divide-x divide-[#b8d8cf] border-t border-[#b8d8cf] pt-4 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-0 text-xs">
