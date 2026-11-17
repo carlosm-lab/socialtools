@@ -1,9 +1,10 @@
 /**
  * CleanStream Studio — Two-Layer Image Forensic Scanner
  * Comprehensive client-side forensic audit for digital images:
- * - Layer 1 (Container & Digital Metadata): Audits binary buffer for EXIF, IPTC, XMP, and C2PA markers.
- * - Layer 2 (Signal Transformation): Audits spatial matrix (Mode 1 intact alert vs Mode 2/3 shielded clean),
- *   perceptual hash integrity (dHash/pHash), and certifies clean audio status ("Sin pista de audio").
+ * - Layer 1 (Container & Digital Metadata): Format-aware binary chunk & segment audit
+ *   for EXIF, IPTC, XMP, and C2PA markers. Never scans compressed pixel data (IDAT/scan lines).
+ * - Layer 2 (Signal Transformation): Spatial matrix audit (Mode 1 intact vs Mode 2/3 shielded),
+ *   perceptual hash integrity (dHash/pHash), and certified clean audio status ("Sin pista de audio").
  */
 
 import { DiagnosticItem, ForensicsReport } from './forensicsScanner';
@@ -17,69 +18,398 @@ export interface ScanImageOptions {
   sourcePixels?: PixelMatrix;
 }
 
+export interface ImageContainerAudit {
+  format: 'png' | 'jpeg' | 'webp' | 'gif' | 'bmp' | 'tiff' | 'avif' | 'unknown';
+  hasC2PA: boolean;
+  c2paDetails: string[];
+  hasTrainedMedia: boolean;
+  hasGoogleProvenance: boolean;
+  hasXMP: boolean;
+  xmpDetails: string[];
+  hasExif: boolean;
+  exifDetails: string[];
+  hasIptc: boolean;
+  iptcDetails: string[];
+  hasIccp: boolean;
+  iccpName?: string;
+  metadataTags: string[];
+  cameraDevices: string[];
+  softwareTags: string[];
+  hasSynthIDMarker: boolean;
+}
+
+function checkCameraNames(str: string, audit: ImageContainerAudit): void {
+  const cameraKeywords = [
+    'Apple', 'iPhone', 'iPad',
+    'Samsung', 'Galaxy',
+    'Xiaomi', 'POCO', 'Redmi',
+    'Sony', 'Canon', 'Nikon',
+    'FUJIFILM', 'Fujifilm',
+    'OLYMPUS', 'Olympus',
+    'LEICA', 'Leica',
+    'Google Pixel', 'Pixel',
+    'Huawei', 'OPPO', 'vivo', 'OnePlus', 'Motorola'
+  ];
+  for (const cam of cameraKeywords) {
+    if (str.includes(cam) && !audit.cameraDevices.includes(cam)) {
+      audit.cameraDevices.push(cam);
+    }
+  }
+}
+
+function checkSoftwareNames(str: string, audit: ImageContainerAudit): void {
+  const softwareKeywords = [
+    'Adobe Photoshop', 'Photoshop', 'Lightroom',
+    'GIMP', 'Capture One', 'Procreate', 'Affinity Photo',
+    'Midjourney', 'Stable Diffusion', 'ComfyUI', 'DALL-E', 'NovelAI'
+  ];
+  for (const sw of softwareKeywords) {
+    if (str.includes(sw) && !audit.softwareTags.includes(sw)) {
+      audit.softwareTags.push(sw);
+    }
+  }
+}
+
+/**
+ * Format-aware binary container parser:
+ * Strictly inspects dedicated metadata chunks, segments, and headers.
+ * NEVER searches inside compressed pixel streams (PNG IDAT, JPEG SOS scan data, WebP VP8/VP8L).
+ */
+export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
+  const audit: ImageContainerAudit = {
+    format: 'unknown',
+    hasC2PA: false,
+    c2paDetails: [],
+    hasTrainedMedia: false,
+    hasGoogleProvenance: false,
+    hasXMP: false,
+    xmpDetails: [],
+    hasExif: false,
+    exifDetails: [],
+    hasIptc: false,
+    iptcDetails: [],
+    hasIccp: false,
+    metadataTags: [],
+    cameraDevices: [],
+    softwareTags: [],
+    hasSynthIDMarker: false,
+  };
+
+  if (!bytes || bytes.length < 4) return audit;
+
+  // 1. PNG Container Audit
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    audit.format = 'png';
+    let offset = 8;
+    const len = bytes.length;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+    while (offset + 12 <= len) {
+      const chunkLen = view.getUint32(offset, false);
+      const chunkType = String.fromCharCode(
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7]
+      );
+      const dataOffset = offset + 8;
+      const nextOffset = offset + 12 + chunkLen;
+      if (nextOffset > len) break;
+
+      const dataSlice = bytes.subarray(dataOffset, dataOffset + chunkLen);
+
+      // Chunks outside IDAT to audit:
+      if (chunkType === 'eXIf') {
+        audit.hasExif = true;
+        audit.metadataTags.push('Cabecera EXIF (chunk eXIf)');
+        const s = new TextDecoder('latin1').decode(dataSlice);
+        checkCameraNames(s, audit);
+        checkSoftwareNames(s, audit);
+        if (s.includes('GPSVersionID') || s.includes('GPSInfo')) {
+          audit.exifDetails.push('Metadatos GPS');
+          audit.metadataTags.push('Coordenadas GPS');
+        }
+      } else if (chunkType === 'iTXt') {
+        const text = new TextDecoder('utf-8', { fatal: false }).decode(dataSlice);
+        const nullIdx = dataSlice.indexOf(0);
+        const keyword = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : '';
+
+        if (keyword === 'XML:com.adobe.xmp' || text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<x:xmpmeta')) {
+          audit.hasXMP = true;
+          audit.metadataTags.push('Paquete XMP Adobe (iTXt)');
+          audit.xmpDetails.push('Paquete XMP Adobe');
+        } else {
+          audit.metadataTags.push(`Texto internacional iTXt${keyword ? ` (${keyword})` : ''}`);
+        }
+
+        if (text.includes('trainedAlgorithmicMedia') || text.includes('digitalSourceType') || text.includes('trainedAlgorithm')) {
+          audit.hasTrainedMedia = true;
+          audit.metadataTags.push('Procedencia IA (trainedAlgorithmicMedia)');
+        }
+
+        if (text.includes('c2pa') || text.includes('jumb') || text.includes('caBX') || text.includes('c2ma')) {
+          audit.hasC2PA = true;
+          audit.c2paDetails.push('Manifiesto C2PA (iTXt)');
+          if (text.includes('Google LLC') || text.includes('Google C2PA') || text.includes('Media Services ICA')) {
+            audit.hasGoogleProvenance = true;
+          }
+        }
+
+        if (text.includes('SynthID') || text.includes('imperceptible SynthID watermark')) {
+          audit.hasSynthIDMarker = true;
+        }
+
+        checkCameraNames(text, audit);
+        checkSoftwareNames(text, audit);
+      } else if (chunkType === 'tEXt' || chunkType === 'zTXt') {
+        const nullIdx = dataSlice.indexOf(0);
+        const keyword = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : '';
+        audit.metadataTags.push(`Bloque de texto PNG ${chunkType}${keyword ? ` (${keyword})` : ''}`);
+        const text = new TextDecoder('latin1').decode(dataSlice);
+        checkCameraNames(text, audit);
+        checkSoftwareNames(text, audit);
+      } else if (chunkType === 'caBX' || chunkType === 'jumb') {
+        audit.hasC2PA = true;
+        audit.metadataTags.push(`Contenedor C2PA / JUMBF (chunk ${chunkType})`);
+        audit.c2paDetails.push(`Manifiesto C2PA (${chunkType})`);
+      } else if (chunkType === 'iCCP') {
+        audit.hasIccp = true;
+        const nullIdx = dataSlice.indexOf(0);
+        const name = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : 'ICC';
+        audit.iccpName = name;
+        audit.metadataTags.push(`Perfil de color iCCP (${name})`);
+      } else if (chunkType === 'tIME') {
+        audit.metadataTags.push('Marca de tiempo (tIME)');
+      }
+
+      offset = nextOffset;
+      if (chunkType === 'IEND') break;
+    }
+    return audit;
+  }
+
+  // 2. JPEG Container Audit
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    audit.format = 'jpeg';
+    let offset = 2;
+    const len = bytes.length;
+
+    while (offset < len) {
+      if (bytes[offset] !== 0xff) { offset++; continue; }
+      while (offset < len && bytes[offset] === 0xff) offset++;
+      if (offset >= len) break;
+      const marker = bytes[offset++];
+      if (marker === 0xd9) break; // EOI
+      if (marker === 0xda) break; // SOS - STOP PARSING! All following data is compressed scan lines!
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (offset + 1 >= len) break;
+      const segLen = (bytes[offset] << 8) | bytes[offset + 1];
+      if (segLen < 2) break;
+      const segEnd = offset + segLen;
+      if (segEnd > len) break;
+
+      const payload = bytes.subarray(offset + 2, segEnd);
+      const str = new TextDecoder('latin1').decode(payload);
+
+      if (marker === 0xe1) { // APP1: EXIF or XMP
+        if (str.startsWith('Exif\0\0')) {
+          audit.hasExif = true;
+          audit.metadataTags.push('Cabecera EXIF IFD0');
+          checkCameraNames(str, audit);
+          checkSoftwareNames(str, audit);
+          if (str.includes('GPSVersionID') || str.includes('GPSInfo')) {
+            audit.exifDetails.push('Metadatos GPS');
+            audit.metadataTags.push('Coordenadas GPS');
+          }
+        } else if (str.includes('http://ns.adobe.com/xap/1.0/') || str.includes('<x:xmpmeta') || str.includes('xmlns:xmp=')) {
+          audit.hasXMP = true;
+          audit.metadataTags.push('Paquete XMP Adobe');
+          audit.xmpDetails.push('Paquete XMP Adobe (APP1)');
+          if (str.includes('trainedAlgorithmicMedia') || str.includes('digitalSourceType') || str.includes('trainedAlgorithm')) {
+            audit.hasTrainedMedia = true;
+            audit.metadataTags.push('Procedencia IA (trainedAlgorithmicMedia)');
+          }
+          if (str.includes('c2pa') || str.includes('jumb') || str.includes('c2ma')) {
+            audit.hasC2PA = true;
+            audit.c2paDetails.push('Manifiesto C2PA (XMP)');
+          }
+          if (str.includes('SynthID')) {
+            audit.hasSynthIDMarker = true;
+          }
+          checkCameraNames(str, audit);
+          checkSoftwareNames(str, audit);
+        }
+      } else if (marker === 0xeb) { // APP11: C2PA
+        audit.hasC2PA = true;
+        audit.metadataTags.push('Contenedor C2PA APP11 (JUMBF)');
+        audit.c2paDetails.push('Manifiesto C2PA / JUMBF (APP11)');
+        if (str.includes('Google LLC') || str.includes('Google C2PA') || str.includes('Media Services ICA')) {
+          audit.hasGoogleProvenance = true;
+        }
+      } else if (marker === 0xed) { // APP13: IPTC / Photoshop 8BIM
+        if (str.includes('Photoshop 3.0') || str.includes('8BIM')) {
+          audit.hasIptc = true;
+          audit.metadataTags.push('Recursos Photoshop IPTC (8BIM)');
+          if (str.includes('\x1c\x02')) {
+            audit.iptcDetails.push('Registro IPTC (ApplicationRecord)');
+          }
+        }
+      } else if (marker === 0xfe) { // COM
+        audit.metadataTags.push('Comentario COM');
+      } else if (marker === 0xe2) { // APP2: ICC / MPF
+        if (str.startsWith('ICC_PROFILE\0')) {
+          audit.hasIccp = true;
+          audit.metadataTags.push('Perfil de color ICC (APP2)');
+        }
+      }
+
+      offset = segEnd;
+    }
+    return audit;
+  }
+
+  // 3. WebP Container Audit
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    audit.format = 'webp';
+    let offset = 12;
+    const len = bytes.length;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+    while (offset + 8 <= len) {
+      const fourCC = String.fromCharCode(
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3]
+      );
+      const chunkSize = view.getUint32(offset + 4, true);
+      const paddedSize = chunkSize + (chunkSize % 2);
+      const nextOffset = offset + 8 + paddedSize;
+      if (nextOffset > len) break;
+
+      const dataSlice = bytes.subarray(offset + 8, offset + 8 + chunkSize);
+      const str = new TextDecoder('latin1').decode(dataSlice);
+
+      if (fourCC === 'EXIF') {
+        audit.hasExif = true;
+        audit.metadataTags.push('Bloque EXIF WebP');
+        checkCameraNames(str, audit);
+        checkSoftwareNames(str, audit);
+        if (str.includes('GPSVersionID') || str.includes('GPSInfo')) {
+          audit.exifDetails.push('Metadatos GPS');
+          audit.metadataTags.push('Coordenadas GPS');
+        }
+      } else if (fourCC === 'XMP ') {
+        audit.hasXMP = true;
+        audit.metadataTags.push('Paquete XMP WebP');
+        audit.xmpDetails.push('Paquete XMP Adobe');
+        if (str.includes('trainedAlgorithmicMedia') || str.includes('digitalSourceType') || str.includes('trainedAlgorithm')) {
+          audit.hasTrainedMedia = true;
+          audit.metadataTags.push('Procedencia IA (trainedAlgorithmicMedia)');
+        }
+        if (str.includes('c2pa') || str.includes('jumb')) {
+          audit.hasC2PA = true;
+          audit.c2paDetails.push('Manifiesto C2PA (WebP)');
+        }
+      } else if (fourCC === 'caBX' || fourCC === 'jumb') {
+        audit.hasC2PA = true;
+        audit.metadataTags.push(`Chunk C2PA WebP (${fourCC})`);
+        audit.c2paDetails.push(`Manifiesto C2PA (${fourCC})`);
+      } else if (fourCC === 'ICCP') {
+        audit.hasIccp = true;
+        audit.metadataTags.push('Perfil de color ICC (WebP)');
+      }
+
+      offset = nextOffset;
+    }
+    return audit;
+  }
+
+  // 4. BMP: Canonical 54 bytes (no standard metadata blocks)
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    audit.format = 'bmp';
+    return audit;
+  }
+
+  // 5. GIF Container Audit
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    audit.format = 'gif';
+    let offset = 13;
+    const len = bytes.length;
+    while (offset < len) {
+      const b = bytes[offset++];
+      if (b === 0x21) { // Extension introducer
+        const label = bytes[offset++];
+        if (label === 0xff) { // Application Extension
+          audit.metadataTags.push('Extensión de aplicación GIF');
+        } else if (label === 0xfe) { // Comment Extension
+          audit.metadataTags.push('Comentario GIF');
+        }
+      } else if (b === 0x3b) {
+        break; // Trailer
+      }
+    }
+    return audit;
+  }
+
+  return audit;
+}
+
 /**
  * Extracts and details the exact metadata tags, EXIF blocks, and IPTC datasets found in images.
+ * Returns exact items or clean status. Never outputs generic "Presente (...)".
  */
-export function extractImageMetadataDetails(text: string): string {
+export function extractImageMetadataDetails(audit: ImageContainerAudit): string {
   const details: string[] = [];
 
-  // 1. EXIF Header & GPS
-  if (text.includes('Exif\0\0')) {
+  if (audit.exifDetails.length > 0) {
+    details.push(...audit.exifDetails);
+  } else if (audit.hasExif) {
     details.push('Cabecera EXIF (TIFF IFD0)');
   }
-  if (text.includes('GPSVersionID') || text.includes('GPSInfo')) {
-    details.push('Metadatos de geolocalización GPS');
+
+  if (audit.cameraDevices.length > 0) {
+    details.push(`Cámara: ${audit.cameraDevices.join(', ')}`);
   }
 
-  // 2. Camera / Device Hardware tags
-  const cameras: string[] = [];
-  if (text.includes('Canon')) cameras.push('Canon');
-  if (text.includes('NIKON') || text.includes('Nikon')) cameras.push('Nikon');
-  if (text.includes('Sony')) cameras.push('Sony');
-  if (text.includes('Apple')) cameras.push('Apple');
-  if (text.includes('Samsung')) cameras.push('Samsung');
-  if (text.includes('Xiaomi') || text.includes('POCO')) cameras.push('Xiaomi');
-  if (text.includes('FUJIFILM') || text.includes('Fujifilm')) cameras.push('Fujifilm');
-  if (text.includes('OLYMPUS') || text.includes('Olympus')) cameras.push('Olympus');
-  if (text.includes('LEICA') || text.includes('Leica')) cameras.push('Leica');
-  if (cameras.length > 0) {
-    details.push(`Cámara: ${cameras.join(', ')}`);
+  if (audit.xmpDetails.length > 0) {
+    details.push(...audit.xmpDetails);
+  } else if (audit.hasXMP) {
+    details.push('Paquete XMP Adobe');
   }
 
-  // 3. Adobe XMP & XML schemas
-  if (text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<x:xmpmeta')) {
-    details.push('Paquete XMP Adobe (ns.adobe.com/xap/1.0/)');
-  } else if (text.includes('xmlns:xmp=') || text.includes('<?xpacket')) {
-    details.push('Paquete de metadatos XMP');
-  }
-
-  // 4. IPTC / Photoshop Resources
-  if (text.includes('Photoshop 3.0') || text.includes('8BIM')) {
+  if (audit.iptcDetails.length > 0) {
+    details.push(...audit.iptcDetails);
+  } else if (audit.hasIptc) {
     details.push('Recursos Photoshop IPTC (8BIM)');
-  } else if (text.includes('\x1c\x02')) {
-    details.push('Registro IPTC (ApplicationRecord)');
   }
 
-  // 5. Software & Editor tags
-  if (text.includes('Adobe Photoshop') || text.includes('Photoshop')) {
-    details.push('Software: Adobe Photoshop');
-  } else if (text.includes('Lightroom')) {
-    details.push('Software: Adobe Lightroom');
-  } else if (text.includes('GIMP')) {
-    details.push('Software: GIMP');
+  if (audit.softwareTags.length > 0) {
+    details.push(`Software: ${audit.softwareTags.join(', ')}`);
   }
 
-  // 6. PNG & WebP specific chunks
-  if (text.includes('tEXt') || text.includes('iTXt') || text.includes('zTXt')) {
-    details.push('Bloques de texto PNG (tEXt/iTXt)');
+  if (audit.hasIccp && audit.iccpName) {
+    details.push(`Perfil de color iCCP (${audit.iccpName})`);
   }
-  if (text.includes('eXIf')) {
-    details.push('Chunk PNG eXIf');
+
+  // Add remaining metadata tags if not already covered
+  for (const tag of audit.metadataTags) {
+    if (!details.some((d) => d.includes(tag) || tag.includes(d))) {
+      details.push(tag);
+    }
   }
 
   return details.length > 0
     ? `Detectado: ${details.join(', ')}`
-    : 'Detectado: Bloque de metadatos de imagen presente';
+    : 'Limpio (Sin paquetes XMP, EXIF ni firmas)';
 }
 
 export async function scanImageForensics(
@@ -95,75 +425,31 @@ export async function scanImageForensics(
   const fileSize = bytes.byteLength;
   const formatInfo = detectImageFormat(bytes);
 
-  // Read entire buffer (or up to 4MB head + tail for huge images) as latin1 string
-  const scanLimit = Math.min(bytes.length, 4 * 1024 * 1024);
-  let text = new TextDecoder('latin1').decode(bytes.subarray(0, scanLimit));
-  if (bytes.length > scanLimit) {
-    const tailSlice = bytes.subarray(bytes.length - scanLimit);
-    text += '\n' + new TextDecoder('latin1').decode(tailSlice);
-  }
-
   // SHA-256 and MD5 cryptographic hashes
   const sha256 = await computeSHA256(bytes);
   const md5 = computeMD5(bytes);
 
   // -------------------------------------------------------------
+  // Format-aware Container & Metadata Audit (NO scanning inside pixel data)
+  // -------------------------------------------------------------
+  const audit = auditImageContainer(bytes);
+
+  // -------------------------------------------------------------
   // Layer 1: Container & Digital Metadata Detection
   // -------------------------------------------------------------
-  const hasC2PA =
-    text.includes('c2pa') ||
-    text.includes('jumb') ||
-    text.includes('caBX') ||
-    text.includes('c2ma');
-
-  const hasTrainedMedia =
-    text.includes('trainedAlgorithmicMedia') ||
-    text.includes('digitalSourceType') ||
-    text.includes('trainedAlgorithm');
-
-  const hasGoogleProvenance =
-    text.includes('Google LLC') ||
-    text.includes('Google C2PA') ||
-    text.includes('Google Inc.') ||
-    text.includes('Google');
-
-  const hasXMP =
-    text.includes('<?xpacket') ||
-    text.includes('http://ns.adobe.com/xap/1.0/') ||
-    text.includes('W5M0MpCehiHzreSzNTczkc9d') ||
-    text.includes('<x:xmpmeta') ||
-    text.includes('xmlns:xmp=') ||
-    text.includes('xmpDM:');
-
-  const hasExifOrIptc =
-    text.includes('Exif\0\0') ||
-    text.includes('GPSVersionID') ||
-    text.includes('Photoshop 3.0') ||
-    text.includes('8BIM') ||
-    text.includes('\x1c\x02'); // IPTC ApplicationRecord dataset
-
-  const hasMetadataAlert = hasXMP || hasExifOrIptc;
+  const hasC2PA = audit.hasC2PA;
+  const hasTrainedMedia = audit.hasTrainedMedia;
+  const hasGoogleProvenance = audit.hasGoogleProvenance;
+  const hasXMP = audit.hasXMP;
+  const hasExifOrIptc = audit.hasExif || audit.hasIptc;
+  const hasMetadataAlert = hasXMP || hasExifOrIptc || audit.metadataTags.length > 0;
 
   // -------------------------------------------------------------
   // Layer 2: Signal Markers & SynthID Watermark Detection
   // -------------------------------------------------------------
-  const hasSynthIDMarker =
-    text.includes('SynthID') ||
-    text.includes('imperceptible SynthID watermark');
-
+  const hasSynthIDMarker = audit.hasSynthIDMarker;
   const hasRawAiMarkers = hasC2PA || hasSynthIDMarker || hasTrainedMedia || hasGoogleProvenance;
-
-  // Physical Camera Metadata Signatures (Xiaomi, Samsung, Apple, Sony, Canon, Nikon, etc.)
-  const hasCameraHardware =
-    text.includes('Canon') ||
-    text.includes('NIKON') ||
-    text.includes('Sony') ||
-    text.includes('FUJIFILM') ||
-    text.includes('OLYMPUS') ||
-    text.includes('LEICA') ||
-    text.includes('Apple') ||
-    text.includes('Samsung') ||
-    text.includes('Xiaomi');
+  const hasCameraHardware = audit.cameraDevices.length > 0;
 
   // Classification Categories: raw_ai, mode1_purged, mode2_shielded, camera_optical
   let fileCategory: 'raw_ai' | 'mode1_purged' | 'mode2_shielded' | 'camera_optical' = 'raw_ai';
@@ -173,18 +459,22 @@ export async function scanImageForensics(
     fileCategory = 'mode2_shielded';
   } else if (hasRawAiMarkers) {
     fileCategory = 'raw_ai';
-  } else if (hasCameraHardware) {
+  } else if (hasCameraHardware && !hasMetadataAlert) {
     fileCategory = 'camera_optical';
   } else if (!hasRawAiMarkers && !hasMetadataAlert) {
+    fileCategory = 'mode1_purged';
+  } else if (hasCameraHardware) {
+    fileCategory = 'camera_optical';
+  } else {
+    // If it has non-AI metadata (e.g. basic ICC profile), it is treated as mode1_purged if no AI markers
     fileCategory = 'mode1_purged';
   }
 
   // Layer 1 Diagnostic Items
-  const isLayer1Active = fileCategory === 'raw_ai';
-  const isC2PAAlert = isLayer1Active && hasC2PA;
-  const isTrainedMediaAlert = isLayer1Active && hasTrainedMedia;
-  const isGoogleAlert = isLayer1Active && hasGoogleProvenance;
-  const isMetadataAlertItem = isLayer1Active && hasMetadataAlert;
+  const isC2PAAlert = hasC2PA;
+  const isTrainedMediaAlert = hasTrainedMedia;
+  const isGoogleAlert = hasGoogleProvenance;
+  const isMetadataAlertItem = hasXMP || hasExifOrIptc || (audit.metadataTags.length > 0 && processedMode === null);
 
   const layer1Items: DiagnosticItem[] = [
     {
@@ -192,7 +482,9 @@ export async function scanImageForensics(
       name: 'Manifiesto C2PA / JUMBF',
       detected: isC2PAAlert,
       currentState: isC2PAAlert
-        ? 'Detectado (Manifiesto de Procedencia C2PA activo en chunks/cajas de imagen)'
+        ? (audit.c2paDetails.length > 0
+            ? `Detectado (${audit.c2paDetails.join(', ')})`
+            : 'Detectado (Manifiesto de Procedencia C2PA activo en chunks/cajas de imagen)')
         : fileCategory === 'mode1_purged' || fileCategory === 'mode2_shielded'
         ? '0 Firmas (Contenedor purgado 100% sin manifiestos)'
         : 'No detectado (Sin manifiestos de procedencia)',
@@ -231,10 +523,10 @@ export async function scanImageForensics(
       name: 'Bloques de Metadatos XMP / EXIF',
       detected: isMetadataAlertItem,
       currentState: isMetadataAlertItem
-        ? extractImageMetadataDetails(text)
+        ? extractImageMetadataDetails(audit)
         : fileCategory === 'mode1_purged' || fileCategory === 'mode2_shielded'
         ? 'Atributos eliminados (0 EXIF, 0 IPTC, 0 XMP)'
-        : 'Limpio (Sin paquetes XMP ni bloques EXIF)',
+        : 'Limpio (Sin paquetes XMP, EXIF ni firmas)',
       sanitizedState: 'Atributos eliminados (0 EXIF, 0 IPTC, 0 XMP)',
       severity: isMetadataAlertItem ? 'alert' : 'clean',
       layer: 1,
@@ -242,7 +534,7 @@ export async function scanImageForensics(
   ];
 
   // Layer 2 Diagnostic Items
-  // Mode 1 leaves spatial pixel matrix untouched (vulnerable to neural watermark detection)
+  // Mode 1 leaves spatial pixel matrix untouched (alerting user that neural watermark shield requires Mode 2)
   const isSynthIdAlert = fileCategory === 'raw_ai' || fileCategory === 'mode1_purged';
   const synthIdItem: DiagnosticItem = {
     id: 'synthid',
@@ -308,7 +600,7 @@ export async function scanImageForensics(
     fileCategory === 'mode1_purged' ||
     fileCategory === 'mode2_shielded' ||
     fileCategory === 'camera_optical' ||
-    (!hasC2PA && !hasTrainedMedia && !hasGoogleProvenance && !hasMetadataAlert);
+    (!hasC2PA && !hasTrainedMedia && !hasGoogleProvenance && !isMetadataAlertItem);
 
   return {
     hasAiMarkers: hasRawAiMarkers,

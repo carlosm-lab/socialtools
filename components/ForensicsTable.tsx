@@ -22,6 +22,12 @@ export default function ForensicsTable({
   const isMode2 = effectiveMode === 'deep' || report.fileCategory === 'mode2_shielded';
   const isCamera = report.fileCategory === 'camera_optical';
 
+  const isImage = fileName
+    ? /\.(jpe?g|png|webp|avif|heic|heif|tiff?|bmp)$/i.test(fileName)
+    : !report.acousticAnalysis?.hasAudio && report.durationSec === 0;
+  const mediaCleanText = isImage ? 'Imagen limpia (Sin firmas detectadas)' : 'Video limpio (Sin firmas detectadas)';
+  const mediaCameraText = isImage ? 'Imagen de cámara auténtica (0 firmas de IA)' : 'Video de cámara auténtico (0 firmas de IA)';
+
   // Group items into Layer 1 and Layer 2
   const layer1Items: DiagnosticItem[] =
     report.layer1?.items ||
@@ -73,7 +79,7 @@ export default function ForensicsTable({
           ) : isCamera ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#cfe8e1] text-[#002941]">
               <CheckCircle2 className="w-4 h-4 text-[#002941]" />
-              Video de cámara auténtico (0 firmas de IA)
+              {mediaCameraText}
             </span>
           ) : report.hasAiMarkers || report.totalMarkersFound > 0 ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#fdf2f2] text-[#7f1d1d]">
@@ -84,7 +90,7 @@ export default function ForensicsTable({
           ) : (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#cfe8e1] text-[#002941]">
               <CheckCircle2 className="w-4 h-4 text-[#002941]" />
-              Video limpio (Sin firmas detectadas)
+              {mediaCleanText}
             </span>
           )}
         </div>

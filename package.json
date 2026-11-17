@@ -15,6 +15,8 @@
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
     "@paddle/paddle-js": "^1.6.6",
+    "@types/jszip": "^3.4.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.454.0",
     "next": "^14.2.16",
     "react": "^18.3.1",

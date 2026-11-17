@@ -69,6 +69,7 @@ export interface UseFFmpegCleanerReturn {
   selectFile: (file: File) => Promise<void>;
   clearFile: () => Promise<void>;
   clearSessionLogs: () => void;
+  getFFmpeg: () => Promise<FFmpeg>;
   executeClean: (
     mode: 'fast' | 'deep' | 'spoofer',
     variantCount?: 3 | 5 | 10,
@@ -770,6 +771,7 @@ export function useFFmpegCleaner(): UseFFmpegCleanerReturn {
     selectFile,
     clearFile,
     clearSessionLogs,
+    getFFmpeg: initFFmpegEngine,
     executeClean,
   };
 }

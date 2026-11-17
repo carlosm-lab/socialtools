@@ -19,6 +19,8 @@ import {
   Check,
   Zap,
   ShieldCheck,
+  Plus,
+  Files,
 } from 'lucide-react';
 import { useFFmpegCleaner } from '@/components/useFFmpegCleaner';
 import { useImageCleaner } from '@/components/useImageCleaner';
@@ -26,6 +28,8 @@ import ModeSelector, { ProcessingMode } from '@/components/ModeSelector';
 import ForensicsTable from '@/components/ForensicsTable';
 import PricingTable from '@/components/PricingTable';
 import LicenseActivationBar from '@/components/LicenseActivationBar';
+import BatchCleanerPanel from '@/components/BatchCleanerPanel';
+import { useBatchCleaner } from '@/components/useBatchCleaner';
 import { VerifyLicenseResponse } from '@/app/api/verify-license/route';
 
 export default function HomePage() {
@@ -58,6 +62,7 @@ export default function HomePage() {
   const [mediaType, setMediaType] = useState<'video' | 'image' | null>(null);
   const videoCleaner = useFFmpegCleaner();
   const imageCleaner = useImageCleaner();
+  const batchCleaner = useBatchCleaner();
 
   const isImage = mediaType === 'image';
   const activeCleaner = isImage ? imageCleaner : videoCleaner;
@@ -191,26 +196,31 @@ export default function HomePage() {
     }
   };
 
+  const handleFilesSelection = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+
+    if (files.length > 1 || batchCleaner.batchItems.length > 0) {
+      await batchCleaner.addFiles(files);
+      await clearFile();
+    } else {
+      await handleFileSelection(files[0]);
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (isProcessing) return;
+    if (isProcessing || batchCleaner.isBatchProcessing) return;
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      const file = files[0];
-      if (
-        file.type.startsWith('video/') ||
-        file.type.startsWith('image/') ||
-        /\.(mp4|mov|webm|m4v|jpe?g|png|webp|avif|heic|heif|tiff?|bmp)$/i.test(file.name)
-      ) {
-        await handleFileSelection(file);
-      }
+      await handleFilesSelection(files);
     }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (!isProcessing) {
+    if (!isProcessing && !batchCleaner.isBatchProcessing) {
       setIsDragging(true);
     }
   };
@@ -223,7 +233,7 @@ export default function HomePage() {
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      await handleFileSelection(files[0]);
+      await handleFilesSelection(files);
     }
     e.target.value = '';
   };
@@ -491,24 +501,49 @@ export default function HomePage() {
           id="estudio"
           className="bg-[#ffffff] border border-[#b8d8cf] rounded-2xl overflow-hidden"
         >
-          {/* Selector de Modos */}
-          <div className="p-4 sm:p-7">
-            <ModeSelector
-              activeMode={activeMode}
-              onChangeMode={setActiveMode}
-              variantCount={variantCount}
-              onChangeVariantCount={setVariantCount}
-              userPlan={userPlan}
-            />
-          </div>
-
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp,image/avif,image/heic,image/tiff,image/bmp"
             onChange={handleFileInputChange}
             className="hidden"
           />
+
+          {batchCleaner.batchItems.length > 0 ? (
+            <div className="p-4 sm:p-7">
+              <BatchCleanerPanel
+                batchItems={batchCleaner.batchItems}
+                isProcessing={batchCleaner.isBatchProcessing}
+                overallProgress={batchCleaner.overallProgress}
+                currentProcessingIndex={batchCleaner.currentProcessingIndex}
+                selectedItemId={batchCleaner.selectedItemId}
+                selectedItem={batchCleaner.selectedItem}
+                activeMode={activeMode}
+                onSelectMode={setActiveMode}
+                onExecuteBatch={() => batchCleaner.executeBatch(activeMode, videoCleaner.getFFmpeg)}
+                onAddMoreFiles={() => fileInputRef.current?.click()}
+                onRemoveItem={batchCleaner.removeItem}
+                onClearBatch={batchCleaner.clearBatch}
+                onSelectItem={batchCleaner.selectItem}
+                onDownloadItem={batchCleaner.downloadItem}
+                onDownloadZip={batchCleaner.downloadBatchZip}
+                batchError={batchCleaner.batchError}
+                batchSuccessMessage={batchCleaner.batchSuccessMessage}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Selector de Modos */}
+              <div className="p-4 sm:p-7">
+                <ModeSelector
+                  activeMode={activeMode}
+                  onChangeMode={setActiveMode}
+                  variantCount={variantCount}
+                  onChangeVariantCount={setVariantCount}
+                  userPlan={userPlan}
+                />
+              </div>
 
           {/* Zona de Carga o Archivo Seleccionado */}
           <div className="border-t border-[#b8d8cf]">
@@ -533,10 +568,10 @@ export default function HomePage() {
                   <Upload className="w-6 h-6" />
                 </div>
                 <h2 className="text-base sm:text-lg font-extrabold text-[#002941]">
-                  Toca para elegir un video o imagen, o arrástralo aquí
+                  Toca para elegir fotos o videos (uno o varios en lote), o arrástralos aquí
                 </h2>
                 <p className="text-xs sm:text-sm text-[#335467] mt-1.5 max-w-md mx-auto">
-                  Video (MP4, MOV, WebM) o Imagen (JPG, PNG, WEBP, AVIF, HEIC, TIFF, BMP) · Hasta 20s gratis en Modo 1 · Procesamiento 100% en tu dispositivo
+                  Videos (MP4, MOV, WebM) y Fotos (JPG, PNG, WEBP, AVIF, HEIC, TIFF, BMP) · Sube archivos individuales o lotes para procesar varios de una vez · 100% en tu dispositivo
                 </p>
                 <div className="mt-5">
                   <button
@@ -548,7 +583,7 @@ export default function HomePage() {
                     className="btn-navy w-full sm:w-auto text-xs sm:text-sm"
                   >
                     <Upload className="w-4 h-4 text-[#cfe8e1]" />
-                    <span>Seleccionar archivo del dispositivo</span>
+                    <span>Seleccionar archivos o lote completo</span>
                   </button>
                 </div>
               </div>
@@ -595,6 +630,20 @@ export default function HomePage() {
                         className="btn-outline-navy text-xs"
                       >
                         Cambiar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (selectedFile) {
+                            await batchCleaner.addFiles([selectedFile]);
+                            await clearFile();
+                          }
+                        }}
+                        disabled={isProcessing}
+                        className="btn-outline-navy text-xs flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Añadir a lote</span>
                       </button>
                       <button
                         type="button"
@@ -1023,6 +1072,8 @@ export default function HomePage() {
               </div>
             </details>
           </div>
+            </>
+          )}
         </section>
 
         {/* 4. PLANES Y COMPARATIVA */}

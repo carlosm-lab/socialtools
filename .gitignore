@@ -39,6 +39,15 @@ clean_video_*.mp4
 test_*.mp4
 temp_*.mp4
 
+# Local image test files
+IMG_*.png
+test_*.png
+test_*.jpg
+test_*.jpeg
+clean_*.png
+clean_*.jpg
+clean_*.jpeg
+
 # Local Database and Data Store
 /data/
 data/
