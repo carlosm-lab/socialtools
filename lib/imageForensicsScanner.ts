@@ -36,6 +36,8 @@ export interface ImageContainerAudit {
   cameraDevices: string[];
   softwareTags: string[];
   hasSynthIDMarker: boolean;
+  hasCleanStreamMode1: boolean;
+  hasCleanStreamMode2: boolean;
 }
 
 function checkCameraNames(str: string, audit: ImageContainerAudit): void {
@@ -93,6 +95,8 @@ export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
     cameraDevices: [],
     softwareTags: [],
     hasSynthIDMarker: false,
+    hasCleanStreamMode1: false,
+    hasCleanStreamMode2: false,
   };
 
   if (!bytes || bytes.length < 4) return audit;
@@ -138,11 +142,17 @@ export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
         const nullIdx = dataSlice.indexOf(0);
         const keyword = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : '';
 
+        if (text.includes('cleanstream_sanitization=mode2')) {
+          audit.hasCleanStreamMode2 = true;
+        } else if (text.includes('cleanstream_sanitization=mode1')) {
+          audit.hasCleanStreamMode1 = true;
+        }
+
         if (keyword === 'XML:com.adobe.xmp' || text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<x:xmpmeta')) {
           audit.hasXMP = true;
           audit.metadataTags.push('Paquete XMP Adobe (iTXt)');
           audit.xmpDetails.push('Paquete XMP Adobe');
-        } else {
+        } else if (!text.includes('cleanstream_sanitization=')) {
           audit.metadataTags.push(`Texto internacional iTXt${keyword ? ` (${keyword})` : ''}`);
         }
 
@@ -166,12 +176,18 @@ export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
         checkCameraNames(text, audit);
         checkSoftwareNames(text, audit);
       } else if (chunkType === 'tEXt' || chunkType === 'zTXt') {
-        const nullIdx = dataSlice.indexOf(0);
-        const keyword = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : '';
-        audit.metadataTags.push(`Bloque de texto PNG ${chunkType}${keyword ? ` (${keyword})` : ''}`);
         const text = new TextDecoder('latin1').decode(dataSlice);
-        checkCameraNames(text, audit);
-        checkSoftwareNames(text, audit);
+        if (text.includes('cleanstream_sanitization=mode2')) {
+          audit.hasCleanStreamMode2 = true;
+        } else if (text.includes('cleanstream_sanitization=mode1')) {
+          audit.hasCleanStreamMode1 = true;
+        } else {
+          const nullIdx = dataSlice.indexOf(0);
+          const keyword = nullIdx > 0 ? new TextDecoder('latin1').decode(dataSlice.subarray(0, nullIdx)) : '';
+          audit.metadataTags.push(`Bloque de texto PNG ${chunkType}${keyword ? ` (${keyword})` : ''}`);
+          checkCameraNames(text, audit);
+          checkSoftwareNames(text, audit);
+        }
       } else if (chunkType === 'caBX' || chunkType === 'jumb') {
         audit.hasC2PA = true;
         audit.metadataTags.push(`Contenedor C2PA / JUMBF (chunk ${chunkType})`);
@@ -259,7 +275,13 @@ export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
           }
         }
       } else if (marker === 0xfe) { // COM
-        audit.metadataTags.push('Comentario COM');
+        if (str.includes('cleanstream_sanitization=mode2')) {
+          audit.hasCleanStreamMode2 = true;
+        } else if (str.includes('cleanstream_sanitization=mode1')) {
+          audit.hasCleanStreamMode1 = true;
+        } else {
+          audit.metadataTags.push('Comentario COM');
+        }
       } else if (marker === 0xe2) { // APP2: ICC / MPF
         if (str.startsWith('ICC_PROFILE\0')) {
           audit.hasIccp = true;
@@ -297,6 +319,12 @@ export function auditImageContainer(bytes: Uint8Array): ImageContainerAudit {
 
       const dataSlice = bytes.subarray(offset + 8, offset + 8 + chunkSize);
       const str = new TextDecoder('latin1').decode(dataSlice);
+
+      if (str.includes('cleanstream_sanitization=mode2')) {
+        audit.hasCleanStreamMode2 = true;
+      } else if (str.includes('cleanstream_sanitization=mode1')) {
+        audit.hasCleanStreamMode1 = true;
+      }
 
       if (fourCC === 'EXIF') {
         audit.hasExif = true;
@@ -452,29 +480,37 @@ export async function scanImageForensics(
   const hasCameraHardware = audit.cameraDevices.length > 0;
 
   // Classification Categories: raw_ai, mode1_purged, mode2_shielded, camera_optical
+  const isMode2Shielded =
+    processedMode === 'deep' ||
+    processedMode === 'spoofer' ||
+    audit.hasCleanStreamMode2;
+
+  const isMode1Purged =
+    processedMode === 'fast' ||
+    audit.hasCleanStreamMode1;
+
   let fileCategory: 'raw_ai' | 'mode1_purged' | 'mode2_shielded' | 'camera_optical' = 'raw_ai';
-  if (processedMode === 'fast') {
-    fileCategory = 'mode1_purged';
-  } else if (processedMode === 'deep' || processedMode === 'spoofer') {
+  if (isMode2Shielded) {
     fileCategory = 'mode2_shielded';
-  } else if (hasRawAiMarkers) {
-    fileCategory = 'raw_ai';
-  } else if (hasCameraHardware && !hasMetadataAlert) {
-    fileCategory = 'camera_optical';
-  } else if (!hasRawAiMarkers && !hasMetadataAlert) {
+  } else if (isMode1Purged) {
     fileCategory = 'mode1_purged';
-  } else if (hasCameraHardware) {
+  } else if (hasCameraHardware && !hasRawAiMarkers) {
     fileCategory = 'camera_optical';
   } else {
-    // If it has non-AI metadata (e.g. basic ICC profile), it is treated as mode1_purged if no AI markers
-    fileCategory = 'mode1_purged';
+    // Digital synthetic image without physical camera hardware provenance
+    // and without CleanStream sanitization certification: treated as raw AI.
+    fileCategory = 'raw_ai';
   }
 
   // Layer 1 Diagnostic Items
   const isC2PAAlert = hasC2PA;
   const isTrainedMediaAlert = hasTrainedMedia;
   const isGoogleAlert = hasGoogleProvenance;
-  const isMetadataAlertItem = hasXMP || hasExifOrIptc || (audit.metadataTags.length > 0 && processedMode === null);
+  const isMetadataAlertItem =
+    hasXMP ||
+    hasExifOrIptc ||
+    audit.metadataTags.length > 0 ||
+    (fileCategory === 'raw_ai' && !hasCameraHardware);
 
   const layer1Items: DiagnosticItem[] = [
     {
@@ -523,7 +559,9 @@ export async function scanImageForensics(
       name: 'Bloques de Metadatos XMP / EXIF',
       detected: isMetadataAlertItem,
       currentState: isMetadataAlertItem
-        ? extractImageMetadataDetails(audit)
+        ? (audit.metadataTags.length > 0
+            ? extractImageMetadataDetails(audit)
+            : 'No detectado (Sin metadatos EXIF de cámara física: indicio sintético de IA)')
         : fileCategory === 'mode1_purged' || fileCategory === 'mode2_shielded'
         ? 'Atributos eliminados (0 EXIF, 0 IPTC, 0 XMP)'
         : 'Limpio (Sin paquetes XMP, EXIF ni firmas)',
@@ -599,11 +637,10 @@ export async function scanImageForensics(
   const isLayer1Verified =
     fileCategory === 'mode1_purged' ||
     fileCategory === 'mode2_shielded' ||
-    fileCategory === 'camera_optical' ||
-    (!hasC2PA && !hasTrainedMedia && !hasGoogleProvenance && !isMetadataAlertItem);
+    (fileCategory === 'camera_optical' && !hasRawAiMarkers && !hasMetadataAlert);
 
   return {
-    hasAiMarkers: hasRawAiMarkers,
+    hasAiMarkers: fileCategory === 'raw_ai' || hasRawAiMarkers,
     totalMarkersFound,
     fileCategory,
     diagnostics,

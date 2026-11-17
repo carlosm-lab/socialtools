@@ -228,23 +228,18 @@ export async function scanVideoForensics(
 
   const isMode1Purged =
     processedMode === 'fast' ||
-    text.includes('cleanstream_sanitization=mode1') ||
-    (!hasRawAiMarkers && !hasCameraHardware && !hasMode2Marker);
+    text.includes('cleanstream_sanitization=mode1');
 
   // Pure binary category determination (zero reliance on file.name)
   let fileCategory: 'raw_ai' | 'mode1_purged' | 'mode2_shielded' | 'camera_optical' = 'raw_ai';
-  if (processedMode === 'fast') {
+  if (processedMode === 'fast' || isMode1Purged) {
     fileCategory = 'mode1_purged';
-  } else if (processedMode === 'deep' || processedMode === 'spoofer') {
+  } else if (processedMode === 'deep' || processedMode === 'spoofer' || hasMode2Marker) {
     fileCategory = 'mode2_shielded';
-  } else if (hasRawAiMarkers) {
-    fileCategory = 'raw_ai';
-  } else if (hasCameraHardware) {
+  } else if (hasCameraHardware && !hasRawAiMarkers) {
     fileCategory = 'camera_optical';
-  } else if (hasMode2Marker) {
-    fileCategory = 'mode2_shielded';
-  } else if (isMode1Purged) {
-    fileCategory = 'mode1_purged';
+  } else {
+    fileCategory = 'raw_ai';
   }
 
   // Audio track detection via standard MP4 ISO handler / sample entries

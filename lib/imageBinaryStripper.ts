@@ -9,11 +9,66 @@
 
 import { detectImageFormat, ImageFormat } from './imageFormatDetector';
 
+// Precomputed CRC32 table for IEEE 802.3 PNG chunk checksums
+const crcTable: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+export function computePngCrc32(buf: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export function createPngTextChunk(keyword: string, text: string): Uint8Array {
+  const keywordBytes = new TextEncoder().encode(keyword);
+  const textBytes = new TextEncoder().encode(text);
+  const dataLen = keywordBytes.length + 1 + textBytes.length;
+  const chunkLen = 12 + dataLen;
+
+  const chunk = new Uint8Array(chunkLen);
+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+
+  // 1. Length (4 bytes BE)
+  view.setUint32(0, dataLen, false);
+
+  // 2. Chunk type 'tEXt' (4 bytes)
+  chunk[4] = 0x74; // 't'
+  chunk[5] = 0x45; // 'E'
+  chunk[6] = 0x58; // 'X'
+  chunk[7] = 0x74; // 't'
+
+  // 3. Keyword + null + text
+  chunk.set(keywordBytes, 8);
+  chunk[8 + keywordBytes.length] = 0x00;
+  chunk.set(textBytes, 9 + keywordBytes.length);
+
+  // 4. CRC32 over type + data (bytes 4 to 8 + dataLen)
+  const crcPayload = chunk.subarray(4, 8 + dataLen);
+  const crc = computePngCrc32(crcPayload);
+  view.setUint32(8 + dataLen, crc, false);
+
+  return chunk;
+}
+
 /**
  * Losslessly strips metadata from JPEG binary stream without recompression.
  * Preserves DQT, DHT, SOF, SOS, and entropy-coded scan data bit-for-bit.
  */
-export function stripJpegMetadata(input: Uint8Array): Uint8Array {
+export function stripJpegMetadata(
+  input: Uint8Array,
+  mode?: 'fast' | 'deep' | 'spoofer'
+): Uint8Array {
   if (input.length < 4 || input[0] !== 0xff || input[1] !== 0xd8) {
     return input; // Not a valid JPEG
   }
@@ -35,6 +90,21 @@ export function stripJpegMetadata(input: Uint8Array): Uint8Array {
     0x00, 0x00  // Thumbnail: 0x0
   ]);
   chunks.push(cleanJfif);
+
+  // Embed CleanStream sanitization marker via standard COM segment if mode is specified
+  if (mode !== undefined) {
+    const tagMode = (mode === 'deep' || mode === 'spoofer') ? 'mode2' : 'mode1';
+    const tagStr = `cleanstream_sanitization=${tagMode}`;
+    const tagBytes = new TextEncoder().encode(tagStr);
+    const comLen = 2 + tagBytes.length;
+    const comSeg = new Uint8Array(2 + comLen);
+    comSeg[0] = 0xff;
+    comSeg[1] = 0xfe; // COM
+    comSeg[2] = (comLen >> 8) & 0xff;
+    comSeg[3] = comLen & 0xff;
+    comSeg.set(tagBytes, 4);
+    chunks.push(comSeg);
+  }
 
   let offset = 2;
   const len = input.length;
@@ -127,8 +197,12 @@ export function stripJpegMetadata(input: Uint8Array): Uint8Array {
  * Losslessly strips metadata from PNG binary stream without recompression.
  * Filters out eXIf, iTXt, tEXt, zTXt, caBX, jumb, tIME, pHYs chunks.
  * Preserves IHDR, PLTE, tRNS, IDAT, and IEND bit-for-bit.
+ * Embeds CleanStream sanitization tag in a tEXt chunk immediately before IEND.
  */
-export function stripPngMetadata(input: Uint8Array): Uint8Array {
+export function stripPngMetadata(
+  input: Uint8Array,
+  mode?: 'fast' | 'deep' | 'spoofer'
+): Uint8Array {
   // Check PNG signature
   if (
     input.length < 8 ||
@@ -177,15 +251,22 @@ export function stripPngMetadata(input: Uint8Array): Uint8Array {
     const fullChunkLength = 12 + dataLength; // 4 (length) + 4 (type) + data + 4 (CRC)
     if (offset + fullChunkLength > len) break;
 
+    if (chunkType === 'IEND') {
+      // Append CleanStream sanitization tEXt chunk immediately before IEND if mode is specified
+      if (mode !== undefined) {
+        const tagMode = (mode === 'deep' || mode === 'spoofer') ? 'mode2' : 'mode1';
+        const textChunk = createPngTextChunk('Comment', `cleanstream_sanitization=${tagMode}`);
+        chunks.push(textChunk);
+      }
+      chunks.push(input.subarray(offset, offset + fullChunkLength));
+      break;
+    }
+
     if (!droppedChunkTypes.has(chunkType)) {
       chunks.push(input.subarray(offset, offset + fullChunkLength));
     }
 
     offset += fullChunkLength;
-
-    if (chunkType === 'IEND') {
-      break;
-    }
   }
 
   const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
@@ -203,7 +284,10 @@ export function stripPngMetadata(input: Uint8Array): Uint8Array {
  * Losslessly strips metadata from WEBP binary stream without recompression.
  * Drops EXIF, XMP , and jumb RIFF chunks, and clears VP8X metadata header flags.
  */
-export function stripWebpMetadata(input: Uint8Array): Uint8Array {
+export function stripWebpMetadata(
+  input: Uint8Array,
+  _mode?: 'fast' | 'deep' | 'spoofer'
+): Uint8Array {
   // Validate RIFF WEBP signature
   if (
     input.length < 12 ||
@@ -318,20 +402,21 @@ export function stripBmpMetadata(input: Uint8Array): Uint8Array {
  */
 export async function stripMetadataUniversal(
   input: ArrayBuffer | Uint8Array,
-  formatHint?: ImageFormat
+  formatHint?: ImageFormat,
+  mode?: 'fast' | 'deep' | 'spoofer'
 ): Promise<{ data: Uint8Array; format: ImageFormat }> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   const info = detectImageFormat(bytes);
   const format = formatHint || info?.format || 'jpeg';
 
   if (format === 'jpeg') {
-    return { data: stripJpegMetadata(bytes), format };
+    return { data: stripJpegMetadata(bytes, mode), format };
   }
   if (format === 'png') {
-    return { data: stripPngMetadata(bytes), format };
+    return { data: stripPngMetadata(bytes, mode), format };
   }
   if (format === 'webp') {
-    return { data: stripWebpMetadata(bytes), format };
+    return { data: stripWebpMetadata(bytes, mode), format };
   }
   if (format === 'bmp') {
     return { data: stripBmpMetadata(bytes), format };
@@ -354,7 +439,7 @@ export async function stripMetadataUniversal(
         );
         if (outputBlob) {
           const arrayBuf = await outputBlob.arrayBuffer();
-          return { data: stripPngMetadata(new Uint8Array(arrayBuf)), format: 'png' };
+          return { data: stripPngMetadata(new Uint8Array(arrayBuf), mode), format: 'png' };
         }
       }
     } catch {

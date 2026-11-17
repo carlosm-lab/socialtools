@@ -174,7 +174,7 @@ export async function processImageMode1(
   const format = formatInfo?.format || 'jpeg';
 
   onProgress?.({ stage: 'Extrayendo y eliminando contenedores C2PA, EXIF, IPTC y XMP...', percent: 50 });
-  const { data: cleanBuffer } = await stripMetadataUniversal(buffer, format);
+  const { data: cleanBuffer } = await stripMetadataUniversal(buffer, format, 'fast');
 
   onProgress?.({ stage: 'Calculando huellas criptográficas...', percent: 80 });
   const sha256 = await computeSHA256(cleanBuffer);
@@ -224,10 +224,12 @@ export async function processImageMode2(
   const perceptualDistance = hammingDistance(sourceDHash, shieldedDHash);
 
   onProgress?.({ stage: 'Codificando contenedor limpio sin metadatos...', percent: 75 });
-  const { blob, buffer: encodedBuffer } = await encodePixelMatrix(
+  const { buffer: rawEncoded } = await encodePixelMatrix(
     shieldedMatrix,
     formatInfo?.mimeType || 'image/jpeg'
   );
+  const { data: encodedBuffer } = await stripMetadataUniversal(rawEncoded, format, 'deep');
+  const blob = new Blob([encodedBuffer as unknown as BlobPart], { type: formatInfo?.mimeType || 'image/jpeg' });
 
   onProgress?.({ stage: 'Verificando huella criptográfica final...', percent: 90 });
   const sha256 = await computeSHA256(encodedBuffer);
@@ -292,10 +294,12 @@ export async function processImageMode3(
     const dHash = computeDHash(variantMatrix);
     const pHash = computePHash(variantMatrix);
 
-    const { blob, buffer: encodedBuffer } = await encodePixelMatrix(
+    const { buffer: rawEncoded } = await encodePixelMatrix(
       variantMatrix,
       formatInfo?.mimeType || 'image/jpeg'
     );
+    const { data: encodedBuffer } = await stripMetadataUniversal(rawEncoded, format, 'spoofer');
+    const blob = new Blob([encodedBuffer as unknown as BlobPart], { type: formatInfo?.mimeType || 'image/jpeg' });
 
     const sha256 = await computeSHA256(encodedBuffer);
     const md5 = computeMD5(encodedBuffer);

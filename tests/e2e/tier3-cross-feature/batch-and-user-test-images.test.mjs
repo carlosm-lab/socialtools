@@ -46,6 +46,13 @@ export const tests = [
         assert.equal(audit.hasExif, false, `File ${fileName} must have no EXIF metadata`);
         assert.equal(audit.hasXMP, false, `File ${fileName} must have no XMP metadata`);
         assert.equal(audit.hasTrainedMedia, false, `File ${fileName} must have no trainedMedia tag`);
+
+        // Forensic Pre-Scan of Raw AI Image
+        const report = await scanImageForensics(buf);
+        assert.equal(report.fileCategory, 'raw_ai', `Raw AI image ${fileName} must be diagnosed as raw_ai`);
+        assert.equal(report.hasAiMarkers, true, `Raw AI image ${fileName} must have hasAiMarkers === true`);
+        assert.ok(report.totalMarkersFound >= 2, `Raw AI image ${fileName} must detect exposed signals (found ${report.totalMarkersFound})`);
+        assert.equal(report.layer1.verified, false, `Layer 1 must not be verified on untreated AI file ${fileName}`);
       }
     },
   },
@@ -70,7 +77,7 @@ export const tests = [
         if (!fs.existsSync(filePath)) continue;
 
         const rawBuf = fs.readFileSync(filePath);
-        const stripped = stripPngMetadata(rawBuf);
+        const stripped = stripPngMetadata(rawBuf, 'fast');
 
         // Verify PNG signature
         assert.equal(stripped[0], 0x89);
@@ -96,13 +103,14 @@ export const tests = [
           if (type === 'IEND') break;
         }
 
-        // Allowed chunks only
-        const allowed = new Set(['IHDR', 'PLTE', 'tRNS', 'sBIT', 'IDAT', 'IEND']);
+        // Allowed chunks only (essential image chunks + CleanStream certification tEXt)
+        const allowed = new Set(['IHDR', 'PLTE', 'tRNS', 'sBIT', 'IDAT', 'IEND', 'tEXt']);
         for (const c of remainingChunks) {
           assert.ok(allowed.has(c), `Chunk ${c} in ${fileName} must be an essential image chunk`);
         }
         assert.ok(!remainingChunks.includes('iCCP'), 'iCCP color profile chunk must be purged');
         assert.ok(!remainingChunks.includes('eXIf'), 'eXIf chunk must not exist');
+        assert.ok(remainingChunks.includes('tEXt'), 'tEXt chunk with CleanStream sanitization marker must exist');
       }
     },
   },
@@ -128,7 +136,7 @@ export const tests = [
         if (!fs.existsSync(filePath)) continue;
 
         const rawBuf = fs.readFileSync(filePath);
-        const stripped = stripPngMetadata(rawBuf);
+        const stripped = stripPngMetadata(rawBuf, 'fast');
 
         const report = await scanImageForensics(stripped);
 
